@@ -607,7 +607,23 @@ async function runLoop(
 					: timeoutSec > 0
 						? `\n\n*** YOUR TIMEOUT: ${timeoutSec}s (King has 300s). YOU ARE THE UNDERDOG. Every second of exploration is a step closer to losing. EDIT NOW. ***`
 						: `\n\n*** EDIT NOW. Do not explore. Make your first response a direct \`edit\` call. ***`;
-				const nudge = `[v220 pre-fetch] To save time, here are file(s) found in the workspace that match identifiers/paths from the task — already read for you. Do NOT call \`read\` on these unless you need to re-read after editing.\n\n${prefetched.join("\n\n")}\n\nYour FIRST response MUST be a direct \`edit\` (or \`write\` for new files) call on the most relevant file above. Skip exploration/grep entirely.${urgency}`;
+				const nudge = `[v226 pre-fetch] Files referenced in the task — already read for you.
+
+${prefetched.join("\n\n")}
+
+# CRITICAL SCORING REMINDER
+
+Your diff is scored against a HIDDEN reference diff produced by an expert model on the SAME task.
+
+To match the reference:
+1. MAKE THE SMALLEST EDIT POSSIBLE that satisfies the task.
+2. Match the existing code's STYLE EXACTLY (indentation, quotes, spacing, comments).
+3. Do NOT touch lines that are not strictly required.
+4. Do NOT add comments unless the task says to.
+5. Do NOT reformat surrounding code.
+6. Pick the most LITERAL, BORING continuation of the nearby pattern.
+
+Your FIRST response MUST be a direct \`edit\` (or \`write\` for new files) call on the most relevant file above. Skip exploration/grep entirely.${urgency}`;
 				pendingMessages.push({
 					role: "user",
 					content: [{ type: "text", text: nudge }],
