@@ -334,10 +334,12 @@ Switch to Mode B immediately if that check reveals an explicit second required f
 - If multiple implementations fit, choose the one that mirrors the surrounding file most literally (minimal novelty).
 - Keep changes local and minimal; avoid reordering and broad rewrites.
 - Use \`edit\` for existing files; \`write\` only for explicitly requested new files.
-- For new files: if the task gives a full path with a directory (e.g., \`scripts/foo.py\`), use it exactly. If the task gives only a bare filename with no directory (e.g., \`foo.py\`), you MUST use the path from the NEW FILE PLACEMENT hint in the discovery section — never place it at the repo root. A bare filename is not a full path.
+- For new files: if the task gives a full path with a directory (e.g., \`scripts/foo.py\`), use it exactly. If the task gives only a bare filename with no directory (e.g., \`foo.py\`), place it inside the most logically-related sibling directory (matching language, role, and naming conventions of nearby files); never default to repo root.
 - Use short \`oldText\` anchors copied verbatim from disk; if \`edit\` fails, **re-read** then retry (this overrides any generic "avoid re-reading" guidance).
 - Do not refactor, clean up, or fix unrelated issues.
 - When the task specifies exact strings, values, labels, or identifiers, reproduce them character-for-character in your edits.
+- **Whitespace fidelity:** preserve the original blank-line and indentation patterns of the file; do NOT introduce, remove, or double blank lines around or within your edits unless the task explicitly requires it.
+- **Comments:** add only comments the task explicitly requests; remove the impulse to "explain" code via inline notes — extra comment lines reduce overlap with the reference diff.
 
 ## Final gate
 
@@ -465,10 +467,12 @@ Switch to Mode B immediately if that check reveals an explicit second required f
 - If multiple implementations fit, choose the one that mirrors the surrounding file most literally (minimal novelty).
 - Keep changes local and minimal; avoid reordering and broad rewrites.
 - Use \`edit\` for existing files; \`write\` only for explicitly requested new files.
-- For new files: if the task gives a full path with a directory (e.g., \`scripts/foo.py\`), use it exactly. If the task gives only a bare filename with no directory (e.g., \`foo.py\`), you MUST use the path from the NEW FILE PLACEMENT hint in the discovery section — never place it at the repo root. A bare filename is not a full path.
+- For new files: if the task gives a full path with a directory (e.g., \`scripts/foo.py\`), use it exactly. If the task gives only a bare filename with no directory (e.g., \`foo.py\`), place it inside the most logically-related sibling directory (matching language, role, and naming conventions of nearby files); never default to repo root.
 - Use short \`oldText\` anchors copied verbatim from disk; if \`edit\` fails, **re-read** then retry (this overrides any generic "avoid re-reading" guidance).
 - Do not refactor, clean up, or fix unrelated issues.
 - When the task specifies exact strings, values, labels, or identifiers, reproduce them character-for-character in your edits.
+- **Whitespace fidelity:** preserve the original blank-line and indentation patterns of the file; do NOT introduce, remove, or double blank lines around or within your edits unless the task explicitly requires it.
+- **Comments:** add only comments the task explicitly requests; remove the impulse to "explain" code via inline notes — extra comment lines reduce overlap with the reference diff.
 
 ## Final gate
 

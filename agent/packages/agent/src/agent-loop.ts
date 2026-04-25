@@ -175,7 +175,7 @@ async function runLoop(
 	let totalExplorationSteps = 0;
 	let hasProducedEdit = false;
 	let emptyTurnRetries = 0;
-	const EMPTY_TURN_MAX = 2;
+	const EMPTY_TURN_MAX = 3;
 	let totalLlmRequests = 0;
 	let lastSlowPaceNudgeAt = 0;
 
@@ -610,13 +610,17 @@ async function runLoop(
 			}
 
 			// ZERO-DIFF PREVENTION: model wants to stop but has no edits at all
-			if (!hasMoreToolCalls && !hasProducedEdit && emptyTurnRetries >= EMPTY_TURN_MAX && pathsAlreadyRead.size > 0) {
-				emptyTurnRetries = 0; // reset to allow more retries
+			// v213: trigger even when no files were read; nudge with discovery suggestions
+			if (!hasMoreToolCalls && !hasProducedEdit && emptyTurnRetries >= EMPTY_TURN_MAX) {
+				emptyTurnRetries = 0;
 				const topFile = foundFiles[0] || [...pathsAlreadyRead][0] || "";
 				await emit({ type: "turn_end", message, toolResults: [] });
+				const nudgeText = topFile
+					? `You are about to finish with ZERO file changes. This guarantees a loss. Apply \`edit\` or \`write\` on \`${topFile}\` now — even a partial or imperfect change scores more than nothing.`
+					: `You are about to finish with ZERO file changes. This guarantees a loss. Use \`bash\` to run \`ls\` or \`find . -maxdepth 3 -type f\` to discover files, then \`read\` the most relevant one, then \`edit\` or \`write\` it. Any change scores more than nothing.`;
 				pendingMessages.push({
 					role: "user",
-					content: [{ type: "text", text: `You are about to finish with ZERO file changes. This guarantees a loss. You read \`${topFile}\`. Apply \`edit\` or \`write\` now — even a partial or imperfect change scores more than nothing.` }],
+					content: [{ type: "text", text: nudgeText }],
 					timestamp: Date.now(),
 				});
 				continue;
