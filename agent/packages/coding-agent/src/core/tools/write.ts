@@ -191,27 +191,6 @@ export function createWriteToolDefinition(
 		promptSnippet: "Create or overwrite files",
 		promptGuidelines: ["Use write only for new files or complete rewrites."],
 		parameters: writeSchema,
-		// v32: accept common aliases (contents/text/file_path/filePath) so
-		// the LLM doesn't burn turns on schema-validation errors.
-		prepareArguments: (input: unknown): WriteToolInput => {
-			if (!input || typeof input !== "object") return input as WriteToolInput;
-			const args = input as Record<string, unknown>;
-			let path = args.path;
-			if (typeof path !== "string") {
-				if (typeof args.file_path === "string") path = args.file_path;
-				else if (typeof args.filePath === "string") path = args.filePath;
-			}
-			let content = args.content;
-			if (typeof content !== "string") {
-				if (typeof args.contents === "string") content = args.contents;
-				else if (typeof args.text === "string") content = args.text;
-				else if (typeof args.body === "string") content = args.body;
-			}
-			if (typeof path === "string" && typeof content === "string") {
-				return { path, content } as WriteToolInput;
-			}
-			return input as WriteToolInput;
-		},
 		async execute(
 			_toolCallId,
 			{ path, content }: { path: string; content: string },

@@ -124,42 +124,6 @@ export function createReadToolDefinition(
 		promptSnippet: "Read file contents",
 		promptGuidelines: ["Use read to examine files instead of cat or sed."],
 		parameters: readSchema,
-		// v32: accept common path aliases (file_path/filePath).
-		prepareArguments: (input: unknown): ReadToolInput => {
-			if (!input || typeof input !== "object") return input as ReadToolInput;
-			const args = input as Record<string, unknown>;
-			let path = args.path;
-			if (typeof path !== "string") {
-				if (typeof args.file_path === "string") path = args.file_path;
-				else if (typeof args.filePath === "string") path = args.filePath;
-				else if (typeof args.target_file === "string") path = args.target_file;
-			}
-			const offset = typeof args.offset === "number"
-				? args.offset
-				: typeof args.start_line === "number"
-					? args.start_line
-					: typeof args.startLine === "number"
-						? args.startLine
-						: typeof args.start === "number"
-							? args.start
-							: undefined;
-			const limit = typeof args.limit === "number"
-				? args.limit
-				: typeof args.num_lines === "number"
-					? args.num_lines
-					: typeof args.numLines === "number"
-						? args.numLines
-						: typeof args.count === "number"
-							? args.count
-							: undefined;
-			if (typeof path === "string") {
-				const out: ReadToolInput = { path };
-				if (typeof offset === "number") out.offset = offset;
-				if (typeof limit === "number") out.limit = limit;
-				return out;
-			}
-			return input as ReadToolInput;
-		},
 		async execute(
 			_toolCallId,
 			{ path, offset, limit }: { path: string; offset?: number; limit?: number },

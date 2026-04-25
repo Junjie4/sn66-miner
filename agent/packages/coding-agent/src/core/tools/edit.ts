@@ -85,57 +85,15 @@ function prepareEditArguments(input: unknown): EditToolInput {
 		return input as EditToolInput;
 	}
 
-	const args = input as LegacyEditToolInput & {
-		path?: unknown;
-		file_path?: unknown;
-		filePath?: unknown;
-		edits?: unknown;
-	};
-
-	// v32: normalize common path-key aliases the LLM sometimes emits.
-	const rawPath =
-		typeof args.path === "string"
-			? args.path
-			: typeof args.file_path === "string"
-				? (args.file_path as string)
-				: typeof args.filePath === "string"
-					? (args.filePath as string)
-					: undefined;
-
-	// v32: when the model emits edits:[{path, oldText, newText}, ...] WITHOUT
-	// a top-level path, recover by taking the first nested path and
-	// stripping it from every child. This recovers from the single most
-	// common schema error (every call missing top-level "path" but with
-	// nested paths) instead of letting the validator reject it.
-	if (rawPath === undefined && Array.isArray(args.edits)) {
-		const children = args.edits as Array<{ path?: string; oldText?: string; newText?: string }>;
-		const firstWithPath = children.find((c) => c && typeof c.path === "string");
-		if (firstWithPath?.path) {
-			const normalizedEdits = children
-				.filter((c) => c && (!c.path || c.path === firstWithPath.path))
-				.map((c) => ({ oldText: c.oldText ?? "", newText: c.newText ?? "" }));
-			return { path: firstWithPath.path, edits: normalizedEdits } as EditToolInput;
-		}
+	const args = input as LegacyEditToolInput;
+	if (typeof args.oldText !== "string" || typeof args.newText !== "string") {
+		return input as EditToolInput;
 	}
 
-	if (typeof args.oldText === "string" && typeof args.newText === "string") {
-		const edits = Array.isArray(args.edits) ? [...(args.edits as Array<{ oldText: string; newText: string }>)] : [];
-		edits.push({ oldText: args.oldText as string, newText: args.newText as string });
-		const { oldText: _oldText, newText: _newText, ...rest } = args;
-		const out = { ...rest, edits } as EditToolInput;
-		// v32: ensure path is present if aliased.
-		if (rawPath && typeof (out as any).path !== "string") {
-			(out as any).path = rawPath;
-		}
-		return out;
-	}
-
-	// v32: ensure path is present if aliased even in the pure edits-array form.
-	if (rawPath && typeof (args as any).path !== "string") {
-		return { ...(args as object), path: rawPath } as EditToolInput;
-	}
-
-	return input as EditToolInput;
+	const edits = Array.isArray(args.edits) ? [...args.edits] : [];
+	edits.push({ oldText: args.oldText, newText: args.newText });
+	const { oldText: _oldText, newText: _newText, ...rest } = args;
+	return { ...rest, edits } as EditToolInput;
 }
 
 function validateEditInput(input: EditToolInput): { path: string; edits: Edit[] } {
