@@ -33,6 +33,7 @@ import { DefaultResourceLoader } from "./core/resource-loader.js";
 import type { CreateAgentSessionOptions } from "./core/sdk.js";
 import { SessionManager } from "./core/session-manager.js";
 import { SettingsManager } from "./core/settings-manager.js";
+import { applyTaskStyleToChangedFiles } from "./core/task-style.js";
 import { printTimings, resetTimings, time } from "./core/timings.js";
 import { allTools } from "./core/tools/index.js";
 import { runMigrations, showDeprecationWarnings } from "./migrations.js";
@@ -841,6 +842,7 @@ export async function main(args: string[]) {
 		process.exit(1);
 	}
 	const mode = parsed.mode || "text";
+	const solverLikePrintRun = mode === "json" && parsed.noSession === true;
 	initTheme(settingsManager.getTheme(), isInteractive);
 	time("initTheme");
 
@@ -986,6 +988,16 @@ export async function main(args: string[]) {
 			initialMessage,
 			initialImages,
 		});
+		if (solverLikePrintRun && exitCode === 0) {
+			const styleResult = await applyTaskStyleToChangedFiles(process.cwd());
+			if (styleResult.enabled) {
+				console.error(
+					chalk.dim(
+						`Applied post-task style (${styleResult.mode}) to ${styleResult.styledFiles}/${styleResult.scannedFiles} changed files`,
+					),
+				);
+			}
+		}
 		stopThemeWatcher();
 		restoreStdout();
 		if (exitCode !== 0) {

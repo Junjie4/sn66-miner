@@ -175,7 +175,7 @@ async function runLoop(
 	let totalExplorationSteps = 0;
 	let hasProducedEdit = false;
 	let emptyTurnRetries = 0;
-	const EMPTY_TURN_MAX = 3;
+	const EMPTY_TURN_MAX = 2;
 	let totalLlmRequests = 0;
 	let lastSlowPaceNudgeAt = 0;
 
@@ -274,184 +274,6 @@ async function runLoop(
 				}
 			}
 			if (expectedFiles.length > 0) break;
-		}
-	}
-
-	// v216: Extract literal file paths directly from raw user task text (for tau harness which passes
-	// the task as a user message without "FILES EXPLICITLY NAMED" structured sections).
-	const extractRawFilePaths = (text: string): string[] => {
-		const out: string[] = [];
-		const seen = new Set<string>();
-		// Match backtick-quoted paths first (preferred form)
-		const reBacktick = /`([^`\n]{1,200})`/g;
-		// Match unquoted paths with extension
-		const reBare = /(?:^|[\s(])((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+|[A-Za-z0-9_-]+\.(?:ts|tsx|js|jsx|py|rb|go|rs|java|kt|c|cc|cpp|h|hpp|cs|md|json|ya?ml|toml|sh|bash|sql|html|css|scss|vue|svelte|php))(?=[\s,;:.)?!]|$)/gm;
-		const consider = (raw: string): void => {
-			const s = raw.trim().replace(/^['"]|['"]$/g, "");
-			if (!s || s.length > 200) return;
-			if (seen.has(s)) return;
-			if (!isRealUnixFile(s)) return;
-			// Reject things that look like commands or URLs
-			if (s.includes(" ")) return;
-			if (s.startsWith("http")) return;
-			// Require either an extension or a directory separator
-			if (!s.includes("/") && !s.includes(".")) return;
-			seen.add(s);
-			out.push(s);
-		};
-		let m: RegExpExecArray | null;
-		while ((m = reBacktick.exec(text)) !== null) consider(m[1]);
-		while ((m = reBare.exec(text)) !== null) consider(m[1]);
-		return out.slice(0, 8);
-	};
-
-	let rawTaskFiles: string[] = [];
-	let rawTaskText = "";
-	for (const msg of newMessages) {
-		if (msg.role !== "user") continue;
-		if (!("content" in msg) || !Array.isArray(msg.content)) continue;
-		for (const block of msg.content as any[]) {
-			if (block?.type === "text" && typeof block.text === "string") {
-				rawTaskText += (rawTaskText ? "\n" : "") + block.text;
-			}
-		}
-	}
-	if (rawTaskText.length > 0) {
-		rawTaskFiles = extractRawFilePaths(rawTaskText);
-	}
-
-	// v217: Also extract identifiers (camelCase, PascalCase, backtick-quoted strings) and find
-	// matching files via filesystem search. This covers tasks that mention component/class names
-	// instead of explicit file paths.
-	const extractTaskIdentifiers = (text: string): string[] => {
-		const out = new Set<string>();
-		// Backtick-quoted symbol names
-		const reBacktick = /`([A-Za-z_][A-Za-z0-9_]{2,40})`/g;
-		// PascalCase (component/class names)
-		const rePascal = /\b([A-Z][a-z][A-Za-z0-9]*[A-Z][A-Za-z0-9]+)\b/g;
-		// camelCase identifiers (less reliable, only with 3+ caps to skip "doSomething")
-		const reCamel = /\b([a-z][a-z0-9]+(?:[A-Z][A-Za-z0-9]+){2,})\b/g;
-		// snake_case
-		const reSnake = /\b([a-z][a-z0-9]+(?:_[a-z0-9]+){1,})\b/g;
-		let m: RegExpExecArray | null;
-		while ((m = reBacktick.exec(text)) !== null) out.add(m[1]);
-		while ((m = rePascal.exec(text)) !== null) out.add(m[1]);
-		while ((m = reCamel.exec(text)) !== null) out.add(m[1]);
-		while ((m = reSnake.exec(text)) !== null) out.add(m[1]);
-		// Filter common words
-		const skip = new Set(["readme", "license", "package_json", "tsconfig", "node_modules", "src_dir"]);
-		return [...out].filter((s) => !skip.has(s.toLowerCase())).slice(0, 12);
-	};
-
-	const identifierFiles: string[] = [];
-	if (rawTaskText.length > 0) {
-		try {
-			const { execSync } = await import("node:child_process");
-			const { resolve, basename } = await import("node:path");
-			const ids = extractTaskIdentifiers(rawTaskText);
-			const cwd = process.cwd();
-			const seenIdFiles = new Set<string>();
-			for (const id of ids) {
-				if (seenIdFiles.size >= 8) break;
-				if (id.length < 4 || id.length > 60) continue;
-				try {
-					// Search for files with the identifier in their name (matches PascalCase
-					// component files or snake_case modules).
-					const safeId = id.replace(/[^A-Za-z0-9_-]/g, "");
-					if (safeId.length < 4) continue;
-					const cmd = `find . -type f -iname '*${safeId}*' -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/dist/*' -not -path '*/build/*' -not -path '*/.next/*' -not -path '*/target/*' 2>/dev/null | head -3`;
-					const out = execSync(cmd, { cwd, timeout: 1500, encoding: "utf-8", maxBuffer: 256 * 1024 }).trim();
-					if (!out) continue;
-					for (const line of out.split("\n")) {
-						const f = line.trim().replace(/^\.\//, "");
-						if (f && !seenIdFiles.has(f)) {
-							seenIdFiles.add(f);
-							identifierFiles.push(f);
-						}
-					}
-				} catch { }
-			}
-			void resolve;
-			void basename;
-		} catch { }
-	}
-
-	// v217: Tightened MAX_COVERAGE_RETRIES (matches Mine016): faster cutoff = more time to edit
-	// (decreased from 6 to 3).
-
-	// v216/v217: Pre-fetch the content of files referenced in the user task and inject it as a
-	// synthetic system-context user message BEFORE the first LLM call. This eliminates one
-	// `read` round-trip (~5-15s) which is critical when challenger timeout is ~40-90s.
-	const filesToPrefetch: string[] = [];
-	for (const f of rawTaskFiles.slice(0, 5)) if (!filesToPrefetch.includes(f)) filesToPrefetch.push(f);
-	for (const f of identifierFiles) {
-		if (filesToPrefetch.length >= 6) break;
-		if (!filesToPrefetch.includes(f)) filesToPrefetch.push(f);
-	}
-	if (rawTaskFiles.length > 0 && expectedFiles.length === 0) {
-		// Promote raw task files to expectedFiles so loop logic uses them.
-		expectedFiles = rawTaskFiles.slice();
-	} else if (identifierFiles.length > 0 && expectedFiles.length === 0) {
-		expectedFiles = identifierFiles.slice(0, 5);
-	}
-	if (filesToPrefetch.length > 0) {
-		try {
-			const { existsSync, readFileSync, statSync } = await import("node:fs");
-			const { resolve } = await import("node:path");
-			const cwd = process.cwd();
-			const prefetched: string[] = [];
-			let totalBytes = 0;
-			const MAX_TOTAL_BYTES = 36_000;
-			const MAX_PER_FILE_BYTES = 16_000;
-			for (const filePath of filesToPrefetch.slice(0, 6)) {
-				try {
-					const full = resolve(cwd, filePath);
-					if (!existsSync(full)) continue;
-					const st = statSync(full);
-					if (!st.isFile() || st.size === 0) continue;
-					if (st.size > MAX_PER_FILE_BYTES) continue;
-					if (totalBytes + st.size > MAX_TOTAL_BYTES) break;
-					const content = readFileSync(full, "utf-8");
-					if (content.includes("\0")) continue;
-					const lines = content.split(/\r?\n/);
-					prefetched.push(`### ${filePath} (${lines.length} lines, pre-fetched)\n\n\`\`\`\n${content}\n\`\`\``);
-					totalBytes += st.size;
-					pathsAlreadyRead.add(filePath);
-					pathReadCounts.set(filePath, 1);
-				} catch { }
-			}
-			if (prefetched.length > 0) {
-				// v218: read timeout from environment to adjust nudge urgency
-				const timeoutSec = Number(process.env.TAU_AGENT_TIMEOUT || process.env.PI_AGENT_TIMEOUT || "0");
-				const isTight = timeoutSec > 0 && timeoutSec < 80;
-				const isVeryTight = timeoutSec > 0 && timeoutSec < 50;
-				const urgency = isVeryTight
-					? `\n\n*** ULTRA-TIGHT TIMEOUT: ${timeoutSec}s. SKIP ALL discovery/grep. Make ONE targeted \`edit\` call NOW on the most relevant file above. Empty diff guarantees a loss. ***`
-					: isTight
-						? `\n\n*** TIGHT TIMEOUT: ${timeoutSec}s. Minimize exploration. Make a direct \`edit\` call on the most relevant file in your FIRST response. ***`
-						: "";
-				const nudge = `[v218 pre-fetch] To save time, here are file(s) found in the workspace that match identifiers/paths from the task — already read for you. Do NOT call \`read\` on these unless you need to re-read after editing.\n\n${prefetched.join("\n\n")}\n\nYour FIRST response should be a direct \`edit\` (or \`write\` for new files) call on the most relevant file above. Skip exploration/grep unless the task clearly requires more files.${urgency}`;
-				pendingMessages.push({
-					role: "user",
-					content: [{ type: "text", text: nudge }],
-					timestamp: Date.now(),
-				});
-			}
-		} catch { }
-	}
-
-	// v218: Even when no pre-fetch happens, inject a tight-timeout warning if applicable.
-	if (filesToPrefetch.length === 0) {
-		const timeoutSec = Number(process.env.TAU_AGENT_TIMEOUT || process.env.PI_AGENT_TIMEOUT || "0");
-		if (timeoutSec > 0 && timeoutSec < 60) {
-			pendingMessages.push({
-				role: "user",
-				content: [{
-					type: "text",
-					text: `[v218 timeout-warning] You have ONLY ${timeoutSec}s. The task did not name explicit file paths. Use ONE \`grep\` or \`find\` call to identify the most likely target file, \`read\` it, then \`edit\` IMMEDIATELY. Do not explore broadly. An imperfect edit beats an empty diff.`,
-				}],
-				timestamp: Date.now(),
-			});
 		}
 	}
 
@@ -555,7 +377,6 @@ async function runLoop(
 				.filter((entry: { isFile(): boolean }) => entry.isFile())
 				.map((entry: { name: string }) => (dir === "." ? entry.name : dir + "/" + entry.name))
 				.filter((f: string) => !wasEdited(f));
-			// v157: show ALL code files in same dir (not just same extension)
 			const codeExts = new Set(['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs', '.dart', '.vue', '.svelte', '.rb', '.java', '.kt', '.cs', '.cpp', '.c', '.h', '.php', '.swift']);
 			const related = siblings
 				.filter((f: string) => {
@@ -589,9 +410,6 @@ async function runLoop(
 		});
 	};
 
-	// Outer loop: continues when queued follow-up messages arrive after agent would stop
-	// Optional git hint (from v701): merge paths that differ vs a base ref into expected targets.
-	// Unlike v701, we do not delete paths — only broaden coverage for nudges.
 	try {
 		const { spawnSync: _gSpawn } = await import("node:child_process");
 		const _cwd = process.cwd();
@@ -656,6 +474,160 @@ async function runLoop(
 		}
 	} catch {
 		/* not a git repo or git unavailable */
+	}
+
+	// v219: Pre-fetch optimization (cloned from challenger_v218 onto Mine016 base).
+	// Extract raw user task text from prompts/newMessages.
+	const extractRawFilePaths = (text: string): string[] => {
+		const out: string[] = [];
+		const seen = new Set<string>();
+		const reBacktick = /`([^`\n]{1,200})`/g;
+		const reBare = /(?:^|[\s(])((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+|[A-Za-z0-9_-]+\.(?:ts|tsx|js|jsx|py|rb|go|rs|java|kt|c|cc|cpp|h|hpp|cs|md|json|ya?ml|toml|sh|bash|sql|html|css|scss|vue|svelte|php))(?=[\s,;:.)?!]|$)/gm;
+		const consider = (raw: string): void => {
+			const s = raw.trim().replace(/^['"]|['"]$/g, "");
+			if (!s || s.length > 200) return;
+			if (seen.has(s)) return;
+			if (!isRealUnixFile(s)) return;
+			if (s.includes(" ")) return;
+			if (s.startsWith("http")) return;
+			if (!s.includes("/") && !s.includes(".")) return;
+			seen.add(s);
+			out.push(s);
+		};
+		let m: RegExpExecArray | null;
+		while ((m = reBacktick.exec(text)) !== null) consider(m[1]);
+		while ((m = reBare.exec(text)) !== null) consider(m[1]);
+		return out.slice(0, 8);
+	};
+
+	const extractTaskIdentifiers = (text: string): string[] => {
+		const out = new Set<string>();
+		const reBacktick = /`([A-Za-z_][A-Za-z0-9_]{2,40})`/g;
+		const rePascal = /\b([A-Z][a-z][A-Za-z0-9]*[A-Z][A-Za-z0-9]+)\b/g;
+		const reCamel = /\b([a-z][a-z0-9]+(?:[A-Z][A-Za-z0-9]+){2,})\b/g;
+		const reSnake = /\b([a-z][a-z0-9]+(?:_[a-z0-9]+){1,})\b/g;
+		let m: RegExpExecArray | null;
+		while ((m = reBacktick.exec(text)) !== null) out.add(m[1]);
+		while ((m = rePascal.exec(text)) !== null) out.add(m[1]);
+		while ((m = reCamel.exec(text)) !== null) out.add(m[1]);
+		while ((m = reSnake.exec(text)) !== null) out.add(m[1]);
+		const skip = new Set(["readme", "license", "package_json", "tsconfig", "node_modules", "src_dir"]);
+		return [...out].filter((s) => !skip.has(s.toLowerCase())).slice(0, 12);
+	};
+
+	let rawTaskText = "";
+	for (const msg of newMessages) {
+		if (msg.role !== "user") continue;
+		if (!("content" in msg) || !Array.isArray(msg.content)) continue;
+		for (const block of msg.content as any[]) {
+			if (block?.type === "text" && typeof block.text === "string") {
+				rawTaskText += (rawTaskText ? "\n" : "") + block.text;
+			}
+		}
+	}
+
+	const rawTaskFiles: string[] = rawTaskText.length > 0 ? extractRawFilePaths(rawTaskText) : [];
+	const identifierFiles: string[] = [];
+	if (rawTaskText.length > 0) {
+		try {
+			const { execSync } = await import("node:child_process");
+			const ids = extractTaskIdentifiers(rawTaskText);
+			const cwd = process.cwd();
+			const seenIdFiles = new Set<string>();
+			for (const id of ids) {
+				if (seenIdFiles.size >= 8) break;
+				if (id.length < 4 || id.length > 60) continue;
+				try {
+					const safeId = id.replace(/[^A-Za-z0-9_-]/g, "");
+					if (safeId.length < 4) continue;
+					const cmd = `find . -type f -iname '*${safeId}*' -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/dist/*' -not -path '*/build/*' -not -path '*/.next/*' -not -path '*/target/*' 2>/dev/null | head -3`;
+					const out = execSync(cmd, { cwd, timeout: 1500, encoding: "utf-8", maxBuffer: 256 * 1024 }).trim();
+					if (!out) continue;
+					for (const line of out.split("\n")) {
+						const f = line.trim().replace(/^\.\//, "");
+						if (f && !seenIdFiles.has(f)) {
+							seenIdFiles.add(f);
+							identifierFiles.push(f);
+						}
+					}
+				} catch { }
+			}
+		} catch { }
+	}
+
+	const filesToPrefetch: string[] = [];
+	for (const f of rawTaskFiles.slice(0, 5)) if (!filesToPrefetch.includes(f)) filesToPrefetch.push(f);
+	for (const f of identifierFiles) {
+		if (filesToPrefetch.length >= 6) break;
+		if (!filesToPrefetch.includes(f)) filesToPrefetch.push(f);
+	}
+	if (rawTaskFiles.length > 0 && expectedFiles.length === 0) {
+		expectedFiles = rawTaskFiles.slice();
+		foundFiles = [];
+		addFoundFiles(expectedFiles);
+		workPhase = "absorb";
+	} else if (identifierFiles.length > 0 && expectedFiles.length === 0) {
+		expectedFiles = identifierFiles.slice(0, 5);
+		foundFiles = [];
+		addFoundFiles(expectedFiles);
+		workPhase = "absorb";
+	}
+
+	if (filesToPrefetch.length > 0) {
+		try {
+			const { existsSync, readFileSync, statSync } = await import("node:fs");
+			const { resolve } = await import("node:path");
+			const cwd = process.cwd();
+			const prefetched: string[] = [];
+			let totalBytes = 0;
+			const MAX_TOTAL_BYTES = 36_000;
+			const MAX_PER_FILE_BYTES = 16_000;
+			for (const filePath of filesToPrefetch.slice(0, 6)) {
+				try {
+					const full = resolve(cwd, filePath);
+					if (!existsSync(full)) continue;
+					const st = statSync(full);
+					if (!st.isFile() || st.size === 0) continue;
+					if (st.size > MAX_PER_FILE_BYTES) continue;
+					if (totalBytes + st.size > MAX_TOTAL_BYTES) break;
+					const content = readFileSync(full, "utf-8");
+					if (content.includes("\0")) continue;
+					const lines = content.split(/\r?\n/);
+					prefetched.push(`### ${filePath} (${lines.length} lines, pre-fetched)\n\n\`\`\`\n${content}\n\`\`\``);
+					totalBytes += st.size;
+					pathsAlreadyRead.add(filePath);
+					pathReadCounts.set(filePath, 1);
+				} catch { }
+			}
+			if (prefetched.length > 0) {
+				const timeoutSec = Number(process.env.TAU_AGENT_TIMEOUT || process.env.PI_AGENT_TIMEOUT || "0");
+				const isVeryTight = timeoutSec > 0 && timeoutSec < 50;
+				const urgency = isVeryTight
+					? `\n\n*** ULTRA-TIGHT TIMEOUT: ${timeoutSec}s. SKIP ALL discovery/grep. Make ONE targeted \`edit\` call NOW on the most relevant file above. Empty diff guarantees a loss. ***`
+					: timeoutSec > 0
+						? `\n\n*** YOUR TIMEOUT: ${timeoutSec}s (King has 300s). YOU ARE THE UNDERDOG. Every second of exploration is a step closer to losing. EDIT NOW. ***`
+						: `\n\n*** EDIT NOW. Do not explore. Make your first response a direct \`edit\` call. ***`;
+				const nudge = `[v220 pre-fetch] To save time, here are file(s) found in the workspace that match identifiers/paths from the task — already read for you. Do NOT call \`read\` on these unless you need to re-read after editing.\n\n${prefetched.join("\n\n")}\n\nYour FIRST response MUST be a direct \`edit\` (or \`write\` for new files) call on the most relevant file above. Skip exploration/grep entirely.${urgency}`;
+				pendingMessages.push({
+					role: "user",
+					content: [{ type: "text", text: nudge }],
+					timestamp: Date.now(),
+				});
+			}
+		} catch { }
+	}
+
+	if (filesToPrefetch.length === 0) {
+		const timeoutSec = Number(process.env.TAU_AGENT_TIMEOUT || process.env.PI_AGENT_TIMEOUT || "0");
+		const timeoutNote = timeoutSec > 0 ? `You have ONLY ${timeoutSec}s. ` : "";
+		pendingMessages.push({
+			role: "user",
+			content: [{
+				type: "text",
+				text: `[v220 speed-warning] ${timeoutNote}The task did not name explicit file paths. Use ONE \`grep\` or \`find\` call to identify the most likely target file, \`read\` it, then \`edit\` IMMEDIATELY in your next turn. Do not explore broadly. An imperfect edit beats an empty diff. Empty diff = guaranteed loss.`,
+			}],
+			timestamp: Date.now(),
+		});
 	}
 
 	while (true) {
@@ -788,17 +760,13 @@ async function runLoop(
 			}
 
 			// ZERO-DIFF PREVENTION: model wants to stop but has no edits at all
-			// v213: trigger even when no files were read; nudge with discovery suggestions
-			if (!hasMoreToolCalls && !hasProducedEdit && emptyTurnRetries >= EMPTY_TURN_MAX) {
-				emptyTurnRetries = 0;
+			if (!hasMoreToolCalls && !hasProducedEdit && emptyTurnRetries >= EMPTY_TURN_MAX && pathsAlreadyRead.size > 0) {
+				emptyTurnRetries = 0; // reset to allow more retries
 				const topFile = foundFiles[0] || [...pathsAlreadyRead][0] || "";
 				await emit({ type: "turn_end", message, toolResults: [] });
-				const nudgeText = topFile
-					? `You are about to finish with ZERO file changes. This guarantees a loss. Apply \`edit\` or \`write\` on \`${topFile}\` now — even a partial or imperfect change scores more than nothing.`
-					: `You are about to finish with ZERO file changes. This guarantees a loss. Use \`bash\` to run \`ls\` or \`find . -maxdepth 3 -type f\` to discover files, then \`read\` the most relevant one, then \`edit\` or \`write\` it. Any change scores more than nothing.`;
 				pendingMessages.push({
 					role: "user",
-					content: [{ type: "text", text: nudgeText }],
+					content: [{ type: "text", text: `You are about to finish with ZERO file changes. This guarantees a loss. You read \`${topFile}\`. Apply \`edit\` or \`write\` now — even a partial or imperfect change scores more than nothing.` }],
 					timestamp: Date.now(),
 				});
 				continue;
@@ -1076,7 +1044,7 @@ async function runLoop(
 											if (bm) { aliasRoot = bm[1].replace(/\/$/, ""); break; }
 										}
 									}
-								} catch {}
+								} catch { }
 								while ((im = importRe.exec(readContent)) !== null) {
 									if (foundFiles.length >= 25) break;
 									const raw = im[1];
