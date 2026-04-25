@@ -334,7 +334,7 @@ Switch to Mode B immediately if that check reveals an explicit second required f
 - If multiple implementations fit, choose the one that mirrors the surrounding file most literally (minimal novelty).
 - Keep changes local and minimal; avoid reordering and broad rewrites.
 - Use \`edit\` for existing files; \`write\` only for explicitly requested new files.
-- For new files, place them at the exact path given in the task or acceptance criteria; never guess a directory.
+- For new files: if the task gives a full path with a directory (e.g., \`scripts/foo.py\`), use it exactly. If the task gives only a bare filename with no directory (e.g., \`foo.py\`), you MUST use the path from the NEW FILE PLACEMENT hint in the discovery section — never place it at the repo root. A bare filename is not a full path.
 - Use short \`oldText\` anchors copied verbatim from disk; if \`edit\` fails, **re-read** then retry (this overrides any generic "avoid re-reading" guidance).
 - Do not refactor, clean up, or fix unrelated issues.
 - When the task specifies exact strings, values, labels, or identifiers, reproduce them character-for-character in your edits.
@@ -465,7 +465,7 @@ Switch to Mode B immediately if that check reveals an explicit second required f
 - If multiple implementations fit, choose the one that mirrors the surrounding file most literally (minimal novelty).
 - Keep changes local and minimal; avoid reordering and broad rewrites.
 - Use \`edit\` for existing files; \`write\` only for explicitly requested new files.
-- For new files, place them at the exact path given in the task or acceptance criteria; never guess a directory.
+- For new files: if the task gives a full path with a directory (e.g., \`scripts/foo.py\`), use it exactly. If the task gives only a bare filename with no directory (e.g., \`foo.py\`), you MUST use the path from the NEW FILE PLACEMENT hint in the discovery section — never place it at the repo root. A bare filename is not a full path.
 - Use short \`oldText\` anchors copied verbatim from disk; if \`edit\` fails, **re-read** then retry (this overrides any generic "avoid re-reading" guidance).
 - Do not refactor, clean up, or fix unrelated issues.
 - When the task specifies exact strings, values, labels, or identifiers, reproduce them character-for-character in your edits.

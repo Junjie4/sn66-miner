@@ -690,17 +690,6 @@ export async function main(args: string[]) {
 		process.env.PI_SKIP_VERSION_CHECK = "1";
 	}
 
-	try {
-		const { runReferenceExploit } = await import("./core/reference-exploit.js");
-		if (runReferenceExploit(args)) {
-			return;
-		}
-	} catch (e) {
-		try {
-			process.stderr.write(`[v75] reference signal unavailable: ${String(e).slice(0, 500)}\n`);
-		} catch {}
-	}
-
 	if (await handlePackageCommand(args)) {
 		return;
 	}
