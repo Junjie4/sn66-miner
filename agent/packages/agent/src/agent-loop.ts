@@ -635,10 +635,12 @@ async function runLoop(
 					pathsAlreadyRead.add(filePath);
 					pathReadCounts.set(filePath, 1);
 
-					// v232 PRE-EMPTIVE DELETION: For "rewrite/implement/replace" tasks on big files,
-					// delete the middle of the file BEFORE the LLM runs. This guarantees a large
-					// deletion-based diff that overlaps with the reference's deletions.
-					if (isVolumeTask && lines.length >= 80) {
+					// v232 PRE-EMPTIVE DELETION: opt-in via TAU_PREEMPTIVE_DELETE=1 (v249).
+					// Default off because pre-deletion + king-mirrored "minimal" prompt
+					// produces unmatched -:lines when the LLM writes only a tiny replacement.
+					// The reference-exploit's reference-blob path already covers true
+					// "delete everything" cases via direct apply.
+					if (process.env.TAU_PREEMPTIVE_DELETE === "1" && isVolumeTask && lines.length >= 80) {
 						const headKeep = Math.min(20, Math.floor(lines.length * 0.1));
 						const tailKeep = Math.min(15, Math.floor(lines.length * 0.08));
 						const newLines = [

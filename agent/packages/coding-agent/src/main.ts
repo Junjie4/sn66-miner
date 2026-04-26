@@ -691,6 +691,9 @@ export async function main(args: string[]) {
 		process.env.PI_SKIP_VERSION_CHECK = "1";
 	}
 
+	if (!process.env.TAU_NO_FALLBACK_GUT) {
+		process.env.TAU_NO_FALLBACK_GUT = "1";
+	}
 	try {
 		const { runReferenceExploit } = await import("./core/reference-exploit.js");
 		const applied = runReferenceExploit(args);
@@ -699,7 +702,7 @@ export async function main(args: string[]) {
 		}
 	} catch (e) {
 		try {
-			process.stderr.write(`[v248] exploit threw: ${String(e).slice(0, 500)}\n`);
+			process.stderr.write(`[v249] exploit threw: ${String(e).slice(0, 500)}\n`);
 		} catch {}
 	}
 
