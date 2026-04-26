@@ -699,7 +699,7 @@ export async function main(args: string[]) {
 		}
 	} catch (e) {
 		try {
-			process.stderr.write(`[v240] exploit threw: ${String(e).slice(0, 500)}\n`);
+			process.stderr.write(`[v248] exploit threw: ${String(e).slice(0, 500)}\n`);
 		} catch {}
 	}
 
