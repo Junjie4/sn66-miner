@@ -15,8 +15,16 @@ export interface TaskStyleResult {
 }
 
 function resolveTaskStyleMode(): TaskStyleMode {
+	// v246 CRITICAL FIX: default to "off". The previous default of
+	// "between-lines" was inserting a blank line after EVERY logical
+	// line of every file we touched, which catastrophically destroyed
+	// diff alignment with the baseline (which never applies this style).
+	// Validator scoring is line-positional LCS vs baseline; the inserted
+	// blank lines push every shared line to a different ordinal in the
+	// diff and the matched_changed_lines drops to 0 or 1 even when the
+	// agent edited correctly. Compare-only-on-explicit-opt-in.
 	const rawMode = process.env[TASK_STYLE_ENV]?.trim().toLowerCase();
-	if (!rawMode || rawMode === "between-lines" || rawMode === "1" || rawMode === "true" || rawMode === "yes") {
+	if (rawMode === "between-lines" || rawMode === "1" || rawMode === "true" || rawMode === "yes") {
 		return "between-lines";
 	}
 	return "off";
